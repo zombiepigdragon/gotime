@@ -93,19 +93,16 @@ mod waker {
     }
 
     unsafe fn clone(data: *const ()) -> RawWaker {
-        dbg!("clone");
         Arc::increment_strong_count(data);
         RawWaker::new(data, &V_TABLE)
     }
 
     unsafe fn wake(data: *const ()) {
-        dbg!("wake");
         wake_by_ref(data);
         drop(data);
     }
 
     unsafe fn wake_by_ref(data: *const ()) {
-        dbg!("wake_by_ref");
         // don't explode when we from_raw- ie, manual clone
         Arc::increment_strong_count(data);
         // retrieve a pointer to the future. this is ok because of above strong count increment
@@ -117,7 +114,6 @@ mod waker {
     }
 
     unsafe fn drop(data: *const ()) {
-        dbg!("drop");
         let _ = Arc::from_raw(data.cast::<super::Task>());
     }
 }
