@@ -8,6 +8,32 @@ use std::{
 
 pub mod ffi;
 
+pub struct Runtime(ffi::generated::Runtime);
+
+impl Runtime {
+    pub fn new() -> Self {
+        println!("Spawning runtime");
+        let ret = unsafe { Runtime(ffi::generated::gotime_start_runtime()) };
+        println!("Spawned runtime");
+        ret
+    }
+
+    // FIXME: This might need to be &mut self, not sure how concurrent Go is here
+    pub fn submit(&self, task: i32) {
+        unsafe {
+            ffi::generated::gotime_submit_task(self.0, task);
+        }
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        println!("Closing runtime");
+        unsafe { ffi::generated::gotime_close_runtime(self.0) };
+        println!("Closed runtime");
+    }
+}
+
 /// Task executor that receives tasks off of a channel and runs them.
 pub struct Executor {
     ready_queue: Receiver<Arc<Task>>,

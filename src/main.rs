@@ -10,9 +10,14 @@ use std::{
 };
 
 fn main() {
-    unsafe {
-        gotime::ffi::generated::HelloGo();
+    let runtime = gotime::Runtime::new();
+    for i in 0..10 {
+        runtime.submit(i)
     }
+    for i in (90..100).rev() {
+        runtime.submit(i)
+    }
+    drop(runtime)
     // let (executor, spawner) = gotime::new_executor_and_spawner();
 
     // // Spawn a task to print before and after waiting on a timer.
