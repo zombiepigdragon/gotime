@@ -1,9 +1,6 @@
-use futures::{
-    future::{BoxFuture, FutureExt},
-    task::{waker_ref, ArcWake},
-};
 use std::{
     future::Future,
+    pin::Pin,
     sync::mpsc::{sync_channel, Receiver, SyncSender},
     sync::{Arc, Mutex},
     task::Context,
@@ -31,7 +28,7 @@ struct Task {
     /// enough to know that `future` is only mutated from one thread,
     /// so we need to use the `Mutex` to prove thread-safety. A production
     /// executor would not need this, and could use `UnsafeCell` instead.
-    future: Mutex<Option<BoxFuture<'static, ()>>>,
+    future: Mutex<Option<Pin<Box<dyn Future<Output = ()> + Send>>>>,
 
     /// Handle to place the task itself back onto the task queue.
     task_sender: SyncSender<Arc<Task>>,
@@ -48,24 +45,12 @@ pub fn new_executor_and_spawner() -> (Executor, Spawner) {
 
 impl Spawner {
     pub fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) {
-        let future = future.boxed();
+        let future = Box::pin(future);
         let task = Arc::new(Task {
             future: Mutex::new(Some(future)),
             task_sender: self.task_sender.clone(),
         });
         self.task_sender.send(task).expect("too many tasks queued");
-    }
-}
-
-impl ArcWake for Task {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        // Implement `wake` by sending this task back onto the task channel
-        // so that it will be polled again by the executor.
-        let cloned = arc_self.clone();
-        arc_self
-            .task_sender
-            .send(cloned)
-            .expect("too many tasks queued");
     }
 }
 
@@ -76,8 +61,7 @@ impl Executor {
             // poll it in an attempt to complete it.
             let mut future_slot = task.future.lock().unwrap();
             if let Some(mut future) = future_slot.take() {
-                // Create a `LocalWaker` from the task itself
-                let waker = waker_ref(&task);
+                let waker = waker::wrap_arc_fut(&task);
                 let context = &mut Context::from_waker(&waker);
                 // `BoxFuture<T>` is a type alias for
                 // `Pin<Box<dyn Future<Output = T> + Send + 'static>>`.
@@ -90,5 +74,50 @@ impl Executor {
                 }
             }
         }
+    }
+}
+
+mod waker {
+    use std::{
+        sync::Arc,
+        task::{RawWaker, RawWakerVTable, Waker},
+    };
+
+    static V_TABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+
+    pub(super) fn wrap_arc_fut(fut: &Arc<super::Task>) -> Waker {
+        let ptr = Arc::into_raw(Arc::clone(fut));
+
+        let raw_waker = RawWaker::new(ptr.cast(), &V_TABLE);
+        unsafe { Waker::from_raw(raw_waker) }
+    }
+
+    unsafe fn clone(data: *const ()) -> RawWaker {
+        dbg!("clone");
+        Arc::increment_strong_count(data);
+        RawWaker::new(data, &V_TABLE)
+    }
+
+    unsafe fn wake(data: *const ()) {
+        dbg!("wake");
+        wake_by_ref(data);
+        drop(data);
+    }
+
+    unsafe fn wake_by_ref(data: *const ()) {
+        dbg!("wake_by_ref");
+        // don't explode when we from_raw- ie, manual clone
+        Arc::increment_strong_count(data);
+        // retrieve a pointer to the future. this is ok because of above strong count increment
+        let fut = Arc::from_raw(data.cast::<super::Task>());
+
+        fut.task_sender
+            .send(fut.clone())
+            .expect("too many tasks queued");
+    }
+
+    unsafe fn drop(data: *const ()) {
+        dbg!("drop");
+        let _ = Arc::from_raw(data.cast::<super::Task>());
     }
 }
