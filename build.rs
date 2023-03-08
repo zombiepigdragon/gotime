@@ -4,6 +4,17 @@ fn main() {
 
     assert_eq!(
         std::process::Command::new("go")
+            .arg("vet")
+            .arg("-mod=vendor")
+            .arg("runtime")
+            .current_dir(runtime_src.parent().unwrap())
+            .status()
+            .unwrap()
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        std::process::Command::new("go")
             .arg("build")
             .arg("-buildmode=c-archive")
             .arg(runtime_src)
