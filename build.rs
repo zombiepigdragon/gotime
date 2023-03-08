@@ -36,10 +36,13 @@ fn main() {
     let bindgen = bindgen::builder()
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .header(out_dir.join("runtime.h").to_str().unwrap());
-    dbg!(bindgen.command_line_flags().join(" "));
     let bindings = bindgen.generate().unwrap();
     bindings.emit_warnings();
     bindings.write_to_file(out_dir.join("runtime.rs")).unwrap();
+
+    // Tell Cargo when to rebuild
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/runtime.go");
 
     // Tell Cargo what we've done
     println!("cargo:rustc-link-search={}", out_dir.display());
