@@ -10,31 +10,20 @@ use std::{
 };
 
 fn main() {
+    println!("Rust: Starting runtime");
     let runtime = gotime::Runtime::new();
-    for i in 0..10 {
-        runtime.submit(i)
-    }
-    for i in (90..100).rev() {
-        runtime.submit(i)
-    }
-    drop(runtime)
-    // let (executor, spawner) = gotime::new_executor_and_spawner();
+    println!("Rust: Started runtime");
 
-    // // Spawn a task to print before and after waiting on a timer.
-    // spawner.spawn(async {
-    //     println!("howdy!");
-    //     // Wait for our timer future to complete after two seconds.
-    //     TimerFuture::new(Duration::new(2, 0)).await;
-    //     println!("done!");
-    // });
+    // Spawn a task to print before and after waiting on a timer.
+    runtime.spawn(async {
+        println!("howdy!");
+        // Wait for our timer future to complete after two seconds.
+        TimerFuture::new(Duration::new(2, 0)).await;
+        println!("done!");
+    });
 
-    // // Drop the spawner so that our executor knows it is finished and won't
-    // // receive more incoming tasks to run.
-    // drop(spawner);
-
-    // // Run the executor until the task queue is empty.
-    // // This will print "howdy!", pause, and then print "done!".
-    // executor.run();
+    runtime.block_on_remaining();
+    println!("Rust: Finished main");
 }
 
 pub struct TimerFuture {
