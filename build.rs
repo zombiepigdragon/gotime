@@ -35,6 +35,7 @@ fn main() {
     // use bindgen to import the Cgo definitions
     let bindgen = bindgen::builder()
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .allowlist_function("gotime_.*")
         .header(out_dir.join("runtime.h").to_str().unwrap());
     let bindings = bindgen.generate().unwrap();
     bindings.emit_warnings();
