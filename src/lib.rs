@@ -5,6 +5,7 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     sync::{Arc, Mutex},
+    task::{RawWaker, RawWakerVTable, Waker},
 };
 
 use crate::ffi::GoHandle;
@@ -45,36 +46,38 @@ pub struct SharedTask {
     fut: TaskFuture,
 }
 
-mod waker {
-    use std::{
-        sync::Arc,
-        task::{RawWaker, RawWakerVTable, Waker},
-    };
+enum MyWaker {}
 
-    use crate::SharedTask;
-
-    // type of the data passed to methods is SharedTask created from Arc
-    static V_TABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
-
-    pub(super) fn new(task: Arc<SharedTask>) -> Waker {
-        let raw_waker = RawWaker::new(Arc::into_raw(task).cast(), &V_TABLE);
+impl MyWaker {
+    fn new(task: Arc<SharedTask>) -> Waker {
+        let raw_waker = RawWaker::new(Arc::into_raw(task).cast(), Self::vtable());
         unsafe { Waker::from_raw(raw_waker) }
+    }
+
+    fn vtable() -> &'static RawWakerVTable {
+        static V_TABLE: RawWakerVTable = RawWakerVTable::new(
+            MyWaker::clone,
+            MyWaker::wake,
+            MyWaker::wake_by_ref,
+            MyWaker::drop,
+        );
+        &V_TABLE
     }
 
     unsafe fn clone(data: *const ()) -> RawWaker {
         Arc::increment_strong_count(data);
-        RawWaker::new(data, &V_TABLE)
+        RawWaker::new(data, Self::vtable())
     }
 
     unsafe fn wake(data: *const ()) {
-        wake_by_ref(data);
-        super::waker::drop(data)
+        Self::wake_by_ref(data);
+        Self::drop(data)
     }
 
     unsafe fn wake_by_ref(data: *const ()) {
         let task: &SharedTask = data.cast::<SharedTask>().as_ref().unwrap();
         let handle = *task.handle.lock().unwrap();
-        super::ffi::wake_task(handle);
+        ffi::wake_task(handle);
     }
 
     unsafe fn drop(data: *const ()) {

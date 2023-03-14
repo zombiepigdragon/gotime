@@ -22,7 +22,7 @@ pub unsafe extern "C" fn process_task(shared_task: *const SharedTask) -> std::ff
         Arc::increment_strong_count(shared_task);
         Arc::from_raw(shared_task)
     };
-    let waker = crate::waker::new(task.clone());
+    let waker = crate::MyWaker::new(task.clone());
     let mut context = Context::from_waker(&waker);
     let is_done = task
         .fut
