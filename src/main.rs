@@ -10,12 +10,15 @@ use std::{
 };
 
 fn main() {
-    gotime::block_on(gotime::Task::spawn(async {
+    dbg!(std::time::Instant::now());
+    let now = gotime::block_on(gotime::Task::spawn(async {
         println!("howdy!");
         // Wait for our timer future to complete after two seconds.
         TimerFuture::new(Duration::new(2, 0)).await;
         println!("done!");
+        std::time::Instant::now()
     }));
+    dbg!(now);
 }
 
 pub struct TimerFuture {

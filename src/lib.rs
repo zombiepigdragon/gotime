@@ -2,7 +2,6 @@
 
 use std::{
     future::Future,
-    marker::PhantomData,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{RawWaker, RawWakerVTable, Waker},
@@ -16,29 +15,34 @@ type TaskFuture = Mutex<Pin<Box<dyn Future<Output = ()>>>>;
 
 pub struct Task<F: Future> {
     shared: Arc<SharedTask>,
-    _marker: PhantomData<F>,
+    value: Arc<Mutex<Option<F::Output>>>,
 }
 
-impl<F: Future<Output = ()> + 'static> Task<F> {
+impl<F: Future + 'static> Task<F> {
     pub fn spawn(fut: F) -> Self {
-        let pinned: Pin<Box<dyn Future<Output = ()>>> = Box::pin(fut);
+        let value = Arc::new(Mutex::new(None));
+        let ret_value = value.clone();
+        let pinned: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
+            *ret_value.lock().unwrap() = Some(fut.await);
+        });
         let shared = Arc::new(SharedTask {
             handle: Mutex::new(GoHandle::nil()),
             fut: Mutex::new(pinned),
         });
         let handle = ffi::spawn_task(Arc::clone(&shared));
         *shared.handle.lock().unwrap() = handle;
-        Self {
-            shared,
-            _marker: PhantomData,
-        }
+        Self { shared, value }
     }
 }
 
-pub fn block_on<F: Future>(task: Task<F>) {
+pub fn block_on<F: Future>(task: Task<F>) -> F::Output {
     let handle = *task.shared.handle.lock().unwrap();
     ffi::block_on(handle);
-    todo!("retrieve the output value")
+    task.value
+        .lock()
+        .unwrap()
+        .take()
+        .expect("future finished evaluating and should have returned")
 }
 
 pub struct SharedTask {
