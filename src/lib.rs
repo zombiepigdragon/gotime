@@ -1,9 +1,13 @@
 #![allow(clippy::missing_safety_doc)] // later
+#![no_std]
 
-use std::{
+extern crate alloc;
+
+use alloc::{boxed::Box, sync::Arc};
+use core::{
+    cell::UnsafeCell,
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
     task::{RawWaker, RawWakerVTable, Waker},
 };
 
@@ -11,42 +15,46 @@ use crate::ffi::GoHandle;
 
 pub mod ffi;
 
-type TaskFuture = Mutex<Pin<Box<dyn Future<Output = ()>>>>;
+type TaskFuture = UnsafeCell<Pin<Box<dyn Future<Output = ()>>>>;
 
 pub struct Task<F: Future> {
     shared: Arc<SharedTask>,
-    value: Arc<Mutex<Option<F::Output>>>,
+    value: Arc<UnsafeCell<Option<F::Output>>>,
 }
 
 impl<F: Future + 'static> Task<F> {
     pub fn spawn(fut: F) -> Self {
-        let value = Arc::new(Mutex::new(None));
+        let value = Arc::new(UnsafeCell::new(None));
         let ret_value = value.clone();
         let pinned: Pin<Box<dyn Future<Output = ()>>> = Box::pin(async move {
-            *ret_value.lock().unwrap() = Some(fut.await);
+            unsafe {
+                *ret_value.get() = Some(fut.await);
+            }
         });
         let shared = Arc::new(SharedTask {
-            handle: Mutex::new(GoHandle::nil()),
-            fut: Mutex::new(pinned),
+            handle: UnsafeCell::new(GoHandle::nil()),
+            fut: UnsafeCell::new(pinned),
         });
         let handle = ffi::spawn_task(Arc::clone(&shared));
-        *shared.handle.lock().unwrap() = handle;
+        unsafe {
+            *shared.handle.get() = handle;
+        }
         Self { shared, value }
     }
 }
 
 pub fn block_on<F: Future>(task: Task<F>) -> F::Output {
-    let handle = *task.shared.handle.lock().unwrap();
+    let handle = unsafe { *task.shared.handle.get() };
     ffi::block_on(handle);
-    task.value
-        .lock()
-        .unwrap()
-        .take()
-        .expect("future finished evaluating and should have returned")
+    unsafe {
+        (*task.value.get())
+            .take()
+            .expect("future finished evaluating and should have returned")
+    }
 }
 
 pub struct SharedTask {
-    handle: Mutex<ffi::GoHandle>,
+    handle: UnsafeCell<ffi::GoHandle>,
     fut: TaskFuture,
 }
 
@@ -80,7 +88,7 @@ impl MyWaker {
 
     unsafe fn wake_by_ref(data: *const ()) {
         let task: &SharedTask = data.cast::<SharedTask>().as_ref().unwrap();
-        let handle = *task.handle.lock().unwrap();
+        let handle = *task.handle.get();
         ffi::wake_task(handle);
     }
 

@@ -1,6 +1,7 @@
 //! Imports and exports to the Gotime runtime.
 
-use std::{sync::Arc, task::Context};
+use alloc::sync::Arc;
+use core::task::Context;
 
 use crate::SharedTask;
 
@@ -16,7 +17,7 @@ mod generated {
 }
 
 #[export_name = "gotime_poll_task"]
-pub unsafe extern "C" fn process_task(shared_task: *const SharedTask) -> std::ffi::c_char {
+pub unsafe extern "C" fn process_task(shared_task: *const SharedTask) -> core::ffi::c_char {
     // Arc::clone on a pointer
     let task = {
         Arc::increment_strong_count(shared_task);
@@ -26,7 +27,8 @@ pub unsafe extern "C" fn process_task(shared_task: *const SharedTask) -> std::ff
     let mut context = Context::from_waker(&waker);
     let is_done = task
         .fut
-        .lock()
+        .get()
+        .as_mut()
         .unwrap()
         .as_mut()
         .poll(&mut context)
