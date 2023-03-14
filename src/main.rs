@@ -10,20 +10,12 @@ use std::{
 };
 
 fn main() {
-    println!("Rust: Starting runtime");
-    let runtime = gotime::Runtime::new();
-    println!("Rust: Started runtime");
-
-    // Spawn a task to print before and after waiting on a timer.
-    runtime.spawn(async {
+    gotime::block_on(gotime::Task::spawn(async {
         println!("howdy!");
         // Wait for our timer future to complete after two seconds.
         TimerFuture::new(Duration::new(2, 0)).await;
         println!("done!");
-    });
-
-    runtime.block_on_remaining();
-    println!("Rust: Finished main");
+    }));
 }
 
 pub struct TimerFuture {

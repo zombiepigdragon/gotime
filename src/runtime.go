@@ -2,68 +2,53 @@ package main
 
 /*
 #include <stdint.h>
-typedef struct {
-	uintptr_t handle;
-} Runtime;
 
-typedef struct {
-	// Rust: &dyn Future
-	void *future;
-	// Go: chan C.Task
-	uintptr_t handle;
-} Task;
-
-void gotime_process_task(Task*);
+// Argument is a Rust gotime::TaskFuture without the shared pointer
+// Return is a bool indicating if the task finished
+char gotime_poll_task(void*);
 */
 import "C"
 import (
-	"fmt"
-	"runtime"
 	"runtime/cgo"
+	"unsafe"
 )
 
-type task_chan chan *C.Task
+type Task struct {
+	future   *C.void
+	waker    chan struct{}
+	finished chan struct{}
+}
 
-//export gotime_start_runtime
-func gotime_start_runtime() C.Runtime {
-	fmt.Println("Go: Runtime started")
-	ch := make(task_chan)
+//export gotime_spawn_task
+func gotime_spawn_task(future *C.void) C.uintptr_t {
+	var task = Task{
+		future:   future,
+		waker:    make(chan struct{}),
+		finished: make(chan struct{}),
+	}
 	go func() {
-		for task := range ch {
-			fmt.Println("Go: Got Task: ", task)
-			C.gotime_process_task(task)
-			fmt.Println("Go: Finished Task ", task)
+		for {
+			if C.gotime_poll_task(unsafe.Pointer(task.future)) == 0 {
+				task.finished <- struct{}{}
+				break
+			}
+			// wait for an item to arrive
+			_ = <-task.waker
 		}
 	}()
-	return C.Runtime{
-		handle: C.uintptr_t(cgo.NewHandle(ch)),
-	}
+	return C.uintptr_t(cgo.NewHandle(task))
 }
 
-//export gotime_submit_task
-func gotime_submit_task(task *C.Task) {
-	fmt.Println("Go: Task submitted")
-	ch := retrieve_runtime_channel(C.Runtime{task.handle})
-	ch <- task
+//export gotime_wake_task
+func gotime_wake_task(handle C.uintptr_t) {
+	var task = cgo.Handle(handle).Value().(Task)
+	task.waker <- struct{}{}
 }
 
-//export gotime_close_runtime
-func gotime_close_runtime(runtime C.Runtime) {
-	fmt.Println("Go: Runtime closed")
-	close(retrieve_runtime_channel(runtime))
-	cgo.Handle(runtime.handle).Delete()
-}
-
-//export gotime_poll_futures
-func gotime_poll_futures() {
-	// always yield
-	for {
-		runtime.Gosched()
-	}
-}
-
-func retrieve_runtime_channel(runtime C.Runtime) task_chan {
-	return cgo.Handle(runtime.handle).Value().(task_chan)
+//export gotime_block_on
+func gotime_block_on(handle C.uintptr_t) {
+	var task = cgo.Handle(handle).Value().(Task)
+	_ = <-task.finished
 }
 
 func main() {}

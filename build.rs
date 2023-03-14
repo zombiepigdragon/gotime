@@ -36,6 +36,7 @@ fn main() {
     let bindgen = bindgen::builder()
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .allowlist_function("gotime_.*")
+        .blocklist_function("gotime_poll_task") // exported from Rust not Go
         .header(out_dir.join("runtime.h").to_str().unwrap());
     let bindings = bindgen.generate().unwrap();
     bindings.emit_warnings();
