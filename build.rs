@@ -20,6 +20,7 @@ fn main() {
         std::process::Command::new("go")
             .arg("build")
             .arg("-buildmode=c-archive")
+            .arg("-asan") // Requires RUSTFLAGS=-Zsanitizer=address to be set.
             .arg(runtime_src)
             .current_dir(&out_dir)
             .status()

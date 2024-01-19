@@ -10,11 +10,24 @@ use std::{
 };
 
 fn main() {
+    println!("Allocating Boxed i32");
+    let boxed = gotime::GoBox::new(6_i32);
+    println!("Allocated Boxed i32");
+    dbg!(&*boxed);
+    println!("Cloning allocation");
+    let boxed2 = boxed.clone();
+    dbg!(&*boxed, &*boxed2);
+    drop(boxed);
+    println!("Freed Boxed i32");
+    dbg!(&*boxed2);
+    drop(boxed2);
+    println!("Freed boxed2");
+
     dbg!(std::time::Instant::now());
     let now = gotime::block_on(gotime::Task::spawn(async {
         println!("howdy!");
-        // Wait for our timer future to complete after two seconds.
-        TimerFuture::new(Duration::new(2, 0)).await;
+        // Wait for our timer future to complete after 0.5 seconds.
+        TimerFuture::new(Duration::from_millis(500)).await;
         println!("done!");
         std::time::Instant::now()
     }));

@@ -1,7 +1,7 @@
 //! Imports and exports to the Gotime runtime.
 
 use alloc::sync::Arc;
-use core::task::Context;
+use core::{mem::MaybeUninit, task::Context};
 
 use crate::SharedTask;
 
@@ -43,15 +43,47 @@ pub fn spawn_task(task: Arc<SharedTask>) -> GoHandle {
     GoHandle(unsafe { generated::gotime_spawn_task(Arc::into_raw(task).cast_mut().cast()) })
 }
 
-pub fn block_on(handle: GoHandle) {
+pub fn block_on(handle: &GoHandle) {
     unsafe { generated::gotime_block_on(handle.0) }
 }
 
-pub fn wake_task(handle: GoHandle) {
+pub fn wake_task(handle: &GoHandle) {
     unsafe { generated::gotime_wake_task(handle.0) }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub fn allocate<T>() -> (GoHandle, *mut MaybeUninit<T>) {
+    let size = core::mem::size_of::<T>();
+    let align = core::mem::size_of::<T>();
+
+    let generated::gotime_allocate_return {
+        r0: handle,
+        r1: ptr,
+    } = unsafe { generated::gotime_allocate(size, align) };
+
+    let handle = GoHandle(handle);
+    let ptr = ptr as *mut MaybeUninit<T>;
+
+    if align > 0 {
+        debug_assert_eq!(
+            ptr as usize % align,
+            0,
+            "allocated pointer ({:p}) has incorrect alignment",
+            ptr,
+        );
+    }
+
+    (handle, ptr)
+}
+
+pub fn clone_allocation(handle: &GoHandle) -> GoHandle {
+    GoHandle(unsafe { generated::gotime_clone_allocation(handle.0) })
+}
+
+pub fn free(handle: GoHandle) {
+    unsafe { generated::gotime_free(handle.0) }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct GoHandle(usize);
 
 impl GoHandle {
