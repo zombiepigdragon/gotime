@@ -132,7 +132,7 @@ impl<T> Deref for GoBox<T> {
 
 impl<T> Drop for GoBox<T> {
     fn drop(&mut self) {
-        ffi::free(core::mem::replace(&mut self.handle, GoHandle::nil()));
+        ffi::free::<T>(core::mem::replace(&mut self.handle, GoHandle::nil()));
     }
 }
 
@@ -179,5 +179,33 @@ mod tests {
     fn go_box_zst() {
         let boxed = GoBox::new(());
         core::hint::black_box(&*boxed); // ensure box is actually allocated
+    }
+
+    #[test]
+    fn go_box_drop() {
+        use core::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        struct NeedsDrop<'a> {
+            dropped: &'a AtomicBool,
+        }
+        impl Drop for NeedsDrop<'_> {
+            fn drop(&mut self) {
+                self.dropped.store(true, SeqCst)
+            }
+        }
+
+        let was_dropped = AtomicBool::new(false);
+        let needs_drop = NeedsDrop {
+            dropped: &was_dropped,
+        };
+
+        let boxed = GoBox::new(needs_drop);
+        assert!(!was_dropped.load(SeqCst), "dropped at boxing");
+        let boxed2 = boxed.clone();
+        assert!(!was_dropped.load(SeqCst), "dropped at clone");
+        drop(boxed2);
+        assert!(!was_dropped.load(SeqCst), "dropped on first free");
+        drop(boxed);
+        assert!(was_dropped.load(SeqCst), "not dropped");
     }
 }

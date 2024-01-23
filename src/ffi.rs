@@ -79,8 +79,17 @@ pub fn clone_allocation(handle: &GoHandle) -> GoHandle {
     GoHandle(unsafe { generated::gotime_clone_allocation(handle.0) })
 }
 
-pub fn free(handle: GoHandle) {
-    unsafe { generated::gotime_free(handle.0) }
+pub fn free<T>(handle: GoHandle) {
+    extern "C" fn drop_t<T2>(value: *mut T2) {
+        unsafe {
+            core::ptr::drop_in_place(value);
+        }
+    }
+    let on_drop = drop_t::<T> as extern "C" fn(_);
+    // I hate this transmute, but the compiler suggested it would be valid
+    let on_drop = unsafe { core::mem::transmute(on_drop) };
+    let on_drop: generated::drop_callback = Some(on_drop);
+    unsafe { generated::gotime_free(handle.0, on_drop) }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
