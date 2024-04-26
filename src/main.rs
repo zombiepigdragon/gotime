@@ -24,7 +24,7 @@ fn main() {
     println!("Freed boxed2");
 
     dbg!(std::time::Instant::now());
-    let now = gotime::block_on(gotime::Task::spawn(async {
+    let now = gotime::block_on(gotime::task::Task::spawn(async {
         println!("howdy!");
         // Wait for our timer future to complete after 0.5 seconds.
         TimerFuture::new(Duration::from_millis(500)).await;
