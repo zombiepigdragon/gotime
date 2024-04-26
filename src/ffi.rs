@@ -1,7 +1,14 @@
 //! Imports and exports to the Gotime runtime.
 
-use alloc::sync::Arc;
-use core::{mem::MaybeUninit, task::Context};
+use core::{
+    ffi::c_void,
+    future::Future,
+    mem::{transmute, MaybeUninit},
+    pin::Pin,
+    sync::atomic,
+    task::{Context, Poll},
+};
+use std::{panic::catch_unwind, println};
 
 use crate::{executor::MyWaker, task::SharedTask};
 
@@ -16,31 +23,64 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/runtime.rs"));
 }
 
-#[export_name = "gotime_poll_task"]
-unsafe extern "C" fn process_task(shared_task: *const SharedTask) -> core::ffi::c_char {
-    // Arc::clone on a pointer
-    let task = {
-        Arc::increment_strong_count(shared_task);
-        Arc::from_raw(shared_task)
-    };
-    let waker = MyWaker::new(task.clone());
-    let mut context = Context::from_waker(&waker);
-    let is_done = task
-        .fut
-        .get()
-        .as_mut()
-        .unwrap()
-        .as_mut()
-        .poll(&mut context)
-        .is_pending();
-    if is_done {
-        Arc::decrement_strong_count(shared_task);
+unsafe extern "C" fn poll_callback<T, F: Future<Output = T>>(task: *mut c_void) -> u8 {
+    let res = catch_unwind(|| {
+        println!("start poll callback");
+        let task: *mut SharedTask<T, F> = task.cast();
+
+        println!("get raw handle");
+        let raw_handle = (*task.cast_const())
+            .raw_handle
+            .load(atomic::Ordering::SeqCst);
+        dbg!(raw_handle);
+        println!("create handle");
+        let waker = MyWaker::new(raw_handle);
+        dbg!(&waker);
+        println!("create context");
+        let mut context = Context::from_waker(&waker);
+
+        println!("transmute fut");
+        let fut: Pin<&mut F> = transmute(&mut (*task).fut);
+
+        println!("poll fut");
+        match fut.poll(&mut context) {
+            Poll::Pending => {
+                println!("pending");
+                0
+            }
+            Poll::Ready(value) => {
+                println!("ready");
+                (*task).result.write(value);
+                1
+            }
+        }
+    });
+    match res {
+        Ok(ret) => ret,
+        Err(e) => {
+            eprintln!("panic!");
+            if let Ok(s) = e.downcast::<&str>() {
+                eprintln!("panic msg: {s}")
+            } else {
+                eprintln!("wrong type")
+            }
+            std::process::abort();
+        }
     }
-    is_done.into()
 }
 
-pub(crate) fn spawn_task(task: Arc<SharedTask>) -> GoHandle {
-    GoHandle(unsafe { generated::gotime_spawn_task(Arc::into_raw(task).cast_mut().cast()) })
+pub(crate) unsafe fn spawn_task<T, F: Future<Output = T>>(task: *mut SharedTask<T, F>) -> GoHandle {
+    let poll_func = poll_callback::<T, F>;
+
+    let erased_task: *mut c_void = task.cast();
+
+    let raw_handle = unsafe { generated::gotime_spawn_task(Some(poll_func), erased_task) };
+
+    (*task)
+        .raw_handle
+        .store(raw_handle, atomic::Ordering::SeqCst);
+
+    GoHandle(raw_handle)
 }
 
 pub(crate) fn block_on(handle: &GoHandle) {
@@ -80,16 +120,19 @@ pub(crate) fn clone_allocation(handle: &GoHandle) -> GoHandle {
 }
 
 pub(crate) fn free<T>(handle: GoHandle) {
-    extern "C" fn drop_t<T2>(value: *mut T2) {
-        unsafe {
-            core::ptr::drop_in_place(value);
-        }
-    }
-    let on_drop = drop_t::<T> as extern "C" fn(_);
-    // I hate this transmute, but the compiler suggested it would be valid
-    let on_drop = unsafe { core::mem::transmute(on_drop) };
-    let on_drop: generated::drop_callback = Some(on_drop);
-    unsafe { generated::gotime_free(handle.0, on_drop) }
+    // extern "C" fn drop_t<T2>(value: *mut T2) {
+    //     unsafe {
+    //         core::ptr::drop_in_place(value);
+    //     }
+    // }
+    let _ = handle;
+    let _ = core::marker::PhantomData::<T>;
+    std::process::abort();
+    // let on_drop = drop_t::<T> as extern "C" fn(_);
+    // // I hate this transmute, but the compiler suggested it would be valid
+    // let on_drop = unsafe { core::mem::transmute(on_drop) };
+    // let on_drop: generated::drop_callback = Some(on_drop);
+    // unsafe { generated::gotime_free(handle.0, on_drop) }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
@@ -98,5 +141,13 @@ pub struct GoHandle(usize);
 impl GoHandle {
     pub fn nil() -> Self {
         Self(0)
+    }
+
+    /// # Safety
+    ///
+    /// This may be used to duplicate handles.
+    /// Passing owned handles to FFI functions more than once can lead to a double-free.
+    pub unsafe fn from_raw(raw_handle: usize) -> Self {
+        Self(raw_handle)
     }
 }

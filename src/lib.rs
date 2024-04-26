@@ -1,7 +1,5 @@
 #![allow(clippy::missing_safety_doc)] // later
-#![no_std]
-
-extern crate alloc;
+                                      // #![no_std]
 
 pub mod boxed;
 pub mod executor;

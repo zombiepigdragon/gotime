@@ -3,9 +3,12 @@ package main
 /*
 #include <stdint.h>
 
-// Argument is a Rust gotime::TaskFuture without the shared pointer
-// Return is a bool indicating if the task finished
-char gotime_poll_task(void*);
+// A function that can be called to poll a future.
+// In Rust, this is the instantiated form of a generic wrapper around poll.
+// Argument is a Rust SharedTask.
+// Return is non-zero if Poll::Ready.
+typedef uint8_t (*poll_callback)(void*);
+static uint8_t invoke_poll_callback(poll_callback f, void *shared_task) {return f(shared_task);}
 
 typedef void (*drop_callback)(void*);
 // FIXME: uintptr_t isn't the right type, but Go crashes when passing a void* and using unsafe.Pointer everywhere
@@ -20,29 +23,35 @@ import (
 )
 
 type Task struct {
-	future   *C.void
-	waker    chan struct{}
-	finished chan struct{}
+	poll_func   C.poll_callback
+	shared_task *C.void
+	waker       chan struct{}
+	finished    chan struct{}
 }
 
 //export gotime_spawn_task
-func gotime_spawn_task(future *C.void) C.uintptr_t {
+func gotime_spawn_task(poll_func C.poll_callback, shared_task *C.void) C.uintptr_t {
 	var task = Task{
-		future:   future,
-		waker:    make(chan struct{}),
-		finished: make(chan struct{}),
+		poll_func:   poll_func,
+		shared_task: shared_task,
+		waker:       make(chan struct{}),
+		finished:    make(chan struct{}),
 	}
 	go func() {
-		for {
-			if C.gotime_poll_task(unsafe.Pointer(task.future)) == 0 {
-				task.finished <- struct{}{}
-				break
-			}
+		println("go: spawned task")
+		for C.invoke_poll_callback(task.poll_func, unsafe.Pointer(shared_task)) == 0 {
+			println("go: polled task")
 			// wait for an item to arrive
 			_ = <-task.waker
+			println("go: waiting on task")
 		}
+		println("go: finished task")
+		task.finished <- struct{}{}
+
 	}()
-	return C.uintptr_t(cgo.NewHandle(task))
+	var handle = C.uintptr_t(cgo.NewHandle(task))
+	println("go: handle is", handle)
+	return handle
 }
 
 //export gotime_wake_task

@@ -1,15 +1,14 @@
 use core::task::{RawWaker, RawWakerVTable, Waker};
 
-use alloc::sync::Arc;
-
-use crate::{ffi, task::SharedTask};
+use crate::ffi::{self, GoHandle};
 
 pub(crate) enum MyWaker {}
 
 impl MyWaker {
     #[allow(clippy::new_ret_no_self)]
-    pub(crate) fn new(task: Arc<SharedTask>) -> Waker {
-        let raw_waker = RawWaker::new(Arc::into_raw(task).cast(), Self::vtable());
+    pub(crate) fn new(raw_handle: usize) -> Waker {
+        println!("new waker");
+        let raw_waker = RawWaker::new(raw_handle as *const (), Self::vtable());
         unsafe { Waker::from_raw(raw_waker) }
     }
 
@@ -24,22 +23,27 @@ impl MyWaker {
     }
 
     unsafe fn clone(data: *const ()) -> RawWaker {
-        Arc::increment_strong_count(data);
+        println!("waker clone");
         RawWaker::new(data, Self::vtable())
     }
 
     unsafe fn wake(data: *const ()) {
+        println!("waker wake");
         Self::wake_by_ref(data);
         Self::drop(data)
     }
 
     unsafe fn wake_by_ref(data: *const ()) {
-        let task: &SharedTask = data.cast::<SharedTask>().as_ref().unwrap();
-        let handle = &*task.handle.get();
+        println!("waker wake by ref");
+        let raw_handle = data as usize;
+        debug_assert_ne!(raw_handle, 0, "handle is nil at wake time");
+        let handle = &GoHandle::from_raw(raw_handle);
+        println!("waker waking with FFI");
         ffi::wake_task(handle);
     }
 
-    unsafe fn drop(data: *const ()) {
-        Arc::decrement_strong_count(data);
+    unsafe fn drop(_: *const ()) {
+        println!("waker drop");
+        // we don't care about this; the waker owns nothing
     }
 }

@@ -10,28 +10,58 @@ use std::{
 };
 
 fn main() {
-    println!("Allocating Boxed i32");
-    let boxed = gotime::GoBox::new(6_i32);
-    println!("Allocated Boxed i32");
-    dbg!(&*boxed);
-    println!("Cloning allocation");
-    let boxed2 = boxed.clone();
-    dbg!(&*boxed, &*boxed2);
-    drop(boxed);
-    println!("Freed Boxed i32");
-    dbg!(&*boxed2);
-    drop(boxed2);
-    println!("Freed boxed2");
+    // println!("Allocating Boxed i32");
+    // let boxed = gotime::GoBox::new(6_i32);
+    // println!("Allocated Boxed i32");
+    // dbg!(&*boxed);
+    // println!("Cloning allocation");
+    // let boxed2 = boxed.clone();
+    // dbg!(&*boxed, &*boxed2);
+    // drop(boxed);
+    // println!("Freed Boxed i32");
+    // dbg!(&*boxed2);
+    // drop(boxed2);
+    // println!("Freed boxed2");
 
-    dbg!(std::time::Instant::now());
-    let now = gotime::block_on(gotime::task::Task::spawn(async {
-        println!("howdy!");
-        // Wait for our timer future to complete after 0.5 seconds.
-        TimerFuture::new(Duration::from_millis(500)).await;
-        println!("done!");
-        std::time::Instant::now()
-    }));
-    dbg!(now);
+    #[derive(Debug)]
+    struct MyUselessFuture {
+        has_run: bool,
+    }
+    impl Future for MyUselessFuture {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            eprintln!("fut: start of poll (should be false)");
+            dbg!(&self);
+            assert!(!self.has_run);
+            eprintln!("fut: post assert (should be false or assert failed)");
+            dbg!(&self);
+            eprintln!("fut: about to do assignment");
+            let this = self.get_mut();
+            this.has_run = true;
+            eprintln!("fut: post assignment (should be true)");
+            dbg!(&this);
+            eprintln!("fut: ready");
+            Poll::Ready(())
+        }
+    }
+
+    let fut = MyUselessFuture { has_run: false };
+    eprintln!("fut: before block_on (should be false)");
+    dbg!(&fut);
+    let () = gotime::block_on(fut);
+
+    // let () = gotime::block_on(async {});
+
+    // dbg!(std::time::Instant::now());
+    // let now = gotime::block_on(async {
+    //     println!("howdy!");
+    //     // Wait for our timer future to complete after 0.5 seconds.
+    //     // TimerFuture::new(Duration::from_millis(5000)).await;
+    //     println!("done!");
+    //     std::time::Instant::now()
+    // });
+    // dbg!(now);
 }
 
 pub struct TimerFuture {
